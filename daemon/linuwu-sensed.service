@@ -1,0 +1,29 @@
+[Unit]
+Description=Linuwu-Sense Fan Curve Daemon
+Documentation=https://github.com/0x7375646F/Linuwu-Sense
+# Wait for the kernel module service to be fully up
+After=linuwu_sense.service
+Wants=linuwu_sense.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/linuwu-sensed --config /etc/linuwu-sense-daemon.yaml --syslog
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+# Give the kernel module a moment to expose sysfs on first start
+ExecStartPre=/bin/sleep 2
+
+# Harden the service
+ProtectSystem=strict
+ProtectHome=true
+# The daemon ONLY needs to write to /sys — allow that
+ReadWritePaths=/sys/module/linuwu_sense
+PrivateTmp=true
+NoNewPrivileges=true
+# Must run as root to write to sysfs fan_speed
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

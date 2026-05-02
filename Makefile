@@ -8,6 +8,19 @@ MDIR  := /lib/modules/$(KVER)/kernel/drivers/platform/x86
 MODNAME := linuwu_sense
 REAL_USER := $(shell echo $${SUDO_USER:-$$(whoami)})
 
+# ── daemon targets ──────────────────────────────────────────────────────────
+daemon:
+	$(MAKE) -C daemon
+
+install-daemon: daemon
+	@sudo bash daemon/install.sh
+
+uninstall-daemon:
+	@sudo bash daemon/uninstall.sh
+
+clean-daemon:
+	$(MAKE) -C daemon clean
+
 all:
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
