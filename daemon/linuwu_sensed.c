@@ -23,6 +23,7 @@
 #include <getopt.h>
 #include <syslog.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 #include <yaml.h>
 
 /* ─── compile-time defaults ─────────────────────────────────────────────── */
@@ -119,29 +120,44 @@ static int sysfs_read_int(const char *path, int *out)
 
 /*
  * Write a formatted string to a sysfs file.
+ * Uses raw write() to ensure the entire value reaches the kernel
+ * store function in a single syscall (required by sysfs semantics).
  */
 static int sysfs_write(const char *path, const char *fmt, ...)
 {
+    char buf[256];
+    va_list ap;
+    va_start(ap, fmt);
+    int len = vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+
+    if (len < 0 || (size_t)len >= sizeof(buf)) {
+        LS_ERR("sysfs_write: format overflow for %s", path);
+        return -1;
+    }
+
     if (g_dry_run) {
-        char buf[256];
-        va_list ap;
-        va_start(ap, fmt);
-        vsnprintf(buf, sizeof(buf), fmt, ap);
-        va_end(ap);
         LS_INFO("[dry-run] would write '%s' -> %s", buf, path);
         return 0;
     }
 
-    FILE *f = fopen(path, "w");
-    if (!f) {
+    int fd = open(path, O_WRONLY);
+    if (fd < 0) {
         LS_ERR("Cannot open %s for writing: %s", path, strerror(errno));
         return -1;
     }
-    va_list ap;
-    va_start(ap, fmt);
-    vfprintf(f, fmt, ap);
-    va_end(ap);
-    fclose(f);
+
+    ssize_t written = write(fd, buf, (size_t)len);
+    close(fd);
+
+    if (written < 0) {
+        LS_ERR("Write to %s failed: %s", path, strerror(errno));
+        return -1;
+    }
+    if (written != len) {
+        LS_WARN("Partial write to %s: %zd of %d bytes", path, written, len);
+    }
+
     return 0;
 }
 
@@ -532,18 +548,37 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    /* ── state for hysteresis ────────────────────────────────────────────── */
+    /* ── state for hysteresis and smoothing ──────────────────────────────── */
     int cpu_fan_current   = 0;
     int gpu_fan_current   = 0;
     int cpu_last_set_temp = 0;
     int gpu_last_set_temp = 0;
+    
+    int cpu_temp_ewma = -1; /* store scaled by 1000 */
+    int gpu_temp_ewma = -1; /* store scaled by 1000 */
 
     /* ── main poll loop ──────────────────────────────────────────────────── */
     while (g_running) {
-        int cpu_temp = acer_hwmon[0]
+        int raw_cpu = acer_hwmon[0]
                        ? read_hwmon_temp_channel(acer_hwmon, HWMON_CPU_TEMP_IDX) : -1;
-        int gpu_temp = acer_hwmon[0]
+        int raw_gpu = acer_hwmon[0]
                        ? read_hwmon_temp_channel(acer_hwmon, HWMON_GPU_TEMP_IDX) : -1;
+
+        if (cpu_temp_ewma < 0 && raw_cpu > 0) {
+            cpu_temp_ewma = raw_cpu * 1000;
+        } else if (raw_cpu > 0) {
+            /* EWMA filter: 75% old, 25% new to smooth out spikes */
+            cpu_temp_ewma = (cpu_temp_ewma * 3 + raw_cpu * 1000) / 4;
+        }
+
+        if (gpu_temp_ewma < 0 && raw_gpu > 0) {
+            gpu_temp_ewma = raw_gpu * 1000;
+        } else if (raw_gpu > 0) {
+            gpu_temp_ewma = (gpu_temp_ewma * 3 + raw_gpu * 1000) / 4;
+        }
+
+        int cpu_temp = cpu_temp_ewma >= 0 ? cpu_temp_ewma / 1000 : -1;
+        int gpu_temp = gpu_temp_ewma >= 0 ? gpu_temp_ewma / 1000 : -1;
 
         int cpu_fan_target = cpu_fan_current;
         int gpu_fan_target = gpu_fan_current;
@@ -582,7 +617,7 @@ int main(int argc, char **argv)
             int write_gpu = gpu_fan_target;
 
             if (write_cpu == FAN_HANDS_OFF) {
-                LS_INFO("CPU %d C / GPU %d C -> STOP (-1,-1): forcing fans off",
+                LS_INFO("CPU %d C / GPU %d C -> HANDS-OFF (-1,-1): restoring AUTO mode",
                         cpu_temp, gpu_temp);
             } else {
                 LS_INFO("CPU %d C -> fan %d%%   GPU %d C -> fan %d%%",
@@ -599,8 +634,8 @@ int main(int argc, char **argv)
     }
 
     /* ── restore auto mode on exit ───────────────────────────────────────── */
-    LS_INFO("linuwu-sensed stopping - restoring auto fan mode (0,0)");
-    sysfs_write(fan_speed_path, "0,0\n");
+    LS_INFO("linuwu-sensed stopping - restoring auto fan mode (-1,-1)");
+    sysfs_write(fan_speed_path, "-1,-1\n");
 
     if (g_use_syslog)
         closelog();

@@ -947,6 +947,14 @@ enum acer_wmi_predator_v4_oc {
  
  static struct device *platform_profile_device;
  static bool platform_profile_support;
+
+ /*
+  * When true, an external process (e.g. linuwu-sensed) is managing fan speeds
+  * via the fan_speed sysfs attribute.  Internal mechanisms (state restore,
+  * thermal profile change) must NOT override fan speeds while this flag is set.
+  * Writing -1,-1 (AUTO) via sysfs clears the flag.
+  */
+ static bool external_fan_control = false;
  
  /*
   * The profile used before turbo mode. This variable is needed for
@@ -2225,7 +2233,7 @@ enum acer_wmi_predator_v4_oc {
      }
  
      /* turn the fan down i mean its quiet mode | eco mode after all*/
-     if(profile == PLATFORM_PROFILE_QUIET || profile == PLATFORM_PROFILE_LOW_POWER) {
+     if((profile == PLATFORM_PROFILE_QUIET || profile == PLATFORM_PROFILE_LOW_POWER) && !external_fan_control) {
          acpi_status stat = acer_set_fan_speed(0,0);
          if(ACPI_FAILURE(stat)){
              return -EIO;
@@ -2422,7 +2430,7 @@ enum acer_wmi_predator_v4_oc {
              return err;
  
          /* the quiter you become the more you'll be able to hear! */
-         if(tp == ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET || tp == ACER_PREDATOR_V4_THERMAL_PROFILE_ECO) {
+         if((tp == ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET || tp == ACER_PREDATOR_V4_THERMAL_PROFILE_ECO) && !external_fan_control) {
              acpi_status stat = acer_set_fan_speed(0,0);
              if(ACPI_FAILURE(stat)){
                  return -EIO;
@@ -3218,7 +3226,7 @@ enum acer_wmi_predator_v4_oc {
              pr_err("Error setting fan speed status: %s\n",acpi_format_exception(status));
              return AE_ERROR;
          }
-     } else if (t_cpu_fan_speed == 0 && t_gpu_fan_speed == 0) {
+     } else if (t_cpu_fan_speed < 0 && t_gpu_fan_speed < 0) {
          pr_info("AUTO FAN MODE!\n");
          status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x410009, NULL);
          if(ACPI_FAILURE(status)){
@@ -3226,7 +3234,7 @@ enum acer_wmi_predator_v4_oc {
              return AE_ERROR;
          }
      } else if (t_cpu_fan_speed <= 100 && t_gpu_fan_speed <= 100) {
-         if (t_cpu_fan_speed == 0) {
+         if (t_cpu_fan_speed < 0) {
              pr_info("CUSTOM FAN MODE (GPU)\n");
              status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x10001, NULL);
              if(ACPI_FAILURE(status)){
@@ -3243,7 +3251,7 @@ enum acer_wmi_predator_v4_oc {
                  pr_err("Error setting fan speed status: %s\n",acpi_format_exception(status));
                  return AE_ERROR;
              }
-         } else if (t_gpu_fan_speed == 0) {
+         } else if (t_gpu_fan_speed < 0) {
              pr_info("CUSTOM FAN MODE (CPU)\n");
              status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x400008, NULL);
              if(ACPI_FAILURE(status)){
@@ -3316,24 +3324,34 @@ enum acer_wmi_predator_v4_oc {
          input[len] = '\0';
      }
  
+     char *buf_copy = kstrdup(buf, GFP_KERNEL);
+     char *input_ptr_copy = buf_copy;
  
-     token = strsep(&input_ptr, ",");
-     if (!token || kstrtoint(token, 10, &t_cpu_fan_speed) || t_cpu_fan_speed < 0 || t_cpu_fan_speed > 100) {
+     token = strsep(&input_ptr_copy, ",");
+     if (!token || kstrtoint(token, 10, &t_cpu_fan_speed) || t_cpu_fan_speed < -1 || t_cpu_fan_speed > 100) {
          pr_err("Invalid CPU speed value.\n");
+         kfree(buf_copy);
          return -EINVAL;
      }
  
-     token = strsep(&input_ptr, ",");
-     if (!token || kstrtoint(token, 10, &t_gpu_fan_speed) || t_gpu_fan_speed < 0 || t_gpu_fan_speed > 100) {
+     token = strsep(&input_ptr_copy, ",");
+     if (!token || kstrtoint(token, 10, &t_gpu_fan_speed) || t_gpu_fan_speed < -1 || t_gpu_fan_speed > 100) {
          pr_err("Invalid GPU speed value.\n");
+         kfree(buf_copy);
          return -EINVAL;
      }
+     kfree(buf_copy);
  
      acpi_status status = acer_set_fan_speed(t_cpu_fan_speed, t_gpu_fan_speed);
      if(ACPI_FAILURE(status)){
          return -ENODEV;
      } 
- 
+
+     /* Track whether an external controller (daemon) is managing fans.
+      * Writing -1,-1 releases control back to the driver.
+      */
+     external_fan_control = !(t_cpu_fan_speed < 0 && t_gpu_fan_speed < 0);
+
      return count;
  }
  /*
@@ -3404,13 +3422,19 @@ enum acer_wmi_predator_v4_oc {
                                         value == 0 ? current_states.battery_state.thermal_profile : current_states.ac_state.thermal_profile);
      if (err)
          return err;
- 
+
+     /* Don't override fan speed if an external process (daemon) is in control */
+     if (external_fan_control) {
+         pr_info("Skipping fan speed restore: external fan control active\n");
+         return AE_OK;
+     }
+
      acpi_status status = acer_set_fan_speed(value == 0 ? current_states.battery_state.cpu_fan_speed : current_states.ac_state.cpu_fan_speed, 
                                  value == 0 ? current_states.battery_state.gpu_fan_speed : current_states.ac_state.gpu_fan_speed);
      if(ACPI_FAILURE(status)){
          return AE_ERROR;
      } 
- 
+
      return AE_OK;
  }
  
@@ -4275,13 +4299,13 @@ enum acer_wmi_predator_v4_oc {
      debugfs_create_u32("devices", S_IRUGO, interface->debug.root,
                 &interface->debug.wmid_devices);
  }
-
+ 
  static const enum acer_wmi_predator_v4_sensor_id acer_wmi_temp_channel_to_sensor_id[] = {
     [0] = ACER_WMID_SENSOR_CPU_TEMPERATURE,
     [1] = ACER_WMID_SENSOR_GPU_TEMPERATURE,
     [2] = ACER_WMID_SENSOR_EXTERNAL_TEMPERATURE_2,
 };
-
+ 
 static const enum acer_wmi_predator_v4_sensor_id acer_wmi_fan_channel_to_sensor_id[] = {
     [0] = ACER_WMID_SENSOR_CPU_FAN_SPEED,
     [1] = ACER_WMID_SENSOR_GPU_FAN_SPEED,
@@ -4292,7 +4316,6 @@ static const enum acer_wmi_predator_v4_sensor_id acer_wmi_fan_channel_to_sensor_
                       int channel)
  {
      enum acer_wmi_predator_v4_sensor_id sensor_id;
-     const u64 *supported_sensors = data;
  
      switch (type) {
      case hwmon_temp:
@@ -4305,10 +4328,7 @@ static const enum acer_wmi_predator_v4_sensor_id acer_wmi_fan_channel_to_sensor_
          return 0;
      }
  
-     if (*supported_sensors & BIT(sensor_id - 1))
-         return 0444;
- 
-     return 0;
+     return 0444;
  }
  
  static int acer_wmi_hwmon_read(struct device *dev, enum hwmon_sensor_types type,
