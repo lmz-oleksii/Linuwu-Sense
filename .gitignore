@@ -1,0 +1,42 @@
+# Kernel module build files
+*.o
+*.ko
+*.mod.c
+*.mod.o
+*.mod
+modules.order
+Module.symvers
+.*.cmd
+.tmp_versions/
+modules.builtin
+modules.builtin.modinfo
+
+# Compilation database
+compile_commands.json
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.swp
+*~
+.vimrc
+tags
+cscope.*
+
+# Core dumps
+core
+core.*
+
+# Compressed files
+*.gz
+*.bz2
+*.xz
+*.lzma
+*.lz4
+*.zst
+
+# Other common ignore files
+*.a
+*.so
+*.patch
+*.diff
