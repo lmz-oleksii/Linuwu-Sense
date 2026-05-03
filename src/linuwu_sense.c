@@ -3341,7 +3341,7 @@ enum acer_wmi_predator_v4_oc {
 
      cpu_changed = (t_cpu != last_sent_cpu);
      gpu_changed = (t_gpu != last_sent_gpu);
-     timeout = time_after(jiffies, last_wmi_jiffies + msecs_to_jiffies(3500));
+     timeout = time_after(jiffies, last_wmi_jiffies + msecs_to_jiffies(4000));
 
      if (!cpu_changed && !gpu_changed && !timeout && last_wmi_jiffies != 0) {
          return; // Skip WMI spam!
