@@ -3211,41 +3211,57 @@ enum acer_wmi_predator_v4_oc {
   */
  static int cpu_fan_speed = 0;
  static int gpu_fan_speed = 0;
+ static u64 current_fan_behavior = 0;
  
  static u64 fan_val_calc(int percentage, int fan_index) {
      return (((percentage * 25600) / 100) & 0xFF00) + fan_index;
  }
- static acpi_status acer_set_fan_speed(int t_cpu_fan_speed, int t_gpu_fan_speed){
+
+ static DEFINE_MUTEX(fan_set_mutex);
+ static int async_cpu_fan_speed = -2;
+ static int async_gpu_fan_speed = -2;
+
+ static acpi_status acer_set_fan_speed_sync(int t_cpu_fan_speed, int t_gpu_fan_speed){
      
      acpi_status status;
  
      if (t_cpu_fan_speed == 100 && t_gpu_fan_speed == 100) {
          pr_info("MAX FAN MODE!\n");
-         status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x820009, NULL);
-         if(ACPI_FAILURE(status)){
-             pr_err("Error setting fan speed status: %s\n",acpi_format_exception(status));
-             return AE_ERROR;
+         if (current_fan_behavior != 0x820009) {
+             status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x820009, NULL);
+             if(ACPI_FAILURE(status)){
+                 pr_err("Error setting fan speed status: %s\n",acpi_format_exception(status));
+                 return AE_ERROR;
+             }
+             current_fan_behavior = 0x820009;
          }
      } else if (t_cpu_fan_speed < 0 && t_gpu_fan_speed < 0) {
          pr_info("AUTO FAN MODE!\n");
-         status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x410009, NULL);
-         if(ACPI_FAILURE(status)){
-             pr_err("Error setting fan speed status: %s\n",acpi_format_exception(status));
-             return AE_ERROR;
+         if (current_fan_behavior != 0x410009) {
+             status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x410009, NULL);
+             if(ACPI_FAILURE(status)){
+                 pr_err("Error setting fan speed status: %s\n",acpi_format_exception(status));
+                 return AE_ERROR;
+             }
+             current_fan_behavior = 0x410009;
          }
      } else if (t_cpu_fan_speed <= 100 && t_gpu_fan_speed <= 100) {
          if (t_cpu_fan_speed < 0) {
              pr_info("CUSTOM FAN MODE (GPU)\n");
-             status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x10001, NULL);
-             if(ACPI_FAILURE(status)){
-                 pr_err("Error setting fan speed status: %s\n",acpi_format_exception(status));
-                 return AE_ERROR;
+             if (current_fan_behavior != 0xC00008) {
+                 status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x10001, NULL);
+                 if(ACPI_FAILURE(status)){
+                     pr_err("Error setting fan speed status: %s\n",acpi_format_exception(status));
+                     return AE_ERROR;
+                 }
+                 status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0xC00008, NULL);
+                 if(ACPI_FAILURE(status)){
+                     pr_err("Error setting fan speed status: %s\n",acpi_format_exception(status));
+                     return AE_ERROR;
+                 }
+                 current_fan_behavior = 0xC00008;
              }
-             status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0xC00008, NULL);
-             if(ACPI_FAILURE(status)){
-                 pr_err("Error setting fan speed status: %s\n",acpi_format_exception(status));
-                 return AE_ERROR;
-             }
+             msleep(150);
              status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_SPEED_METHODID, fan_val_calc(t_gpu_fan_speed,4), NULL);
              if(ACPI_FAILURE(status)){
                  pr_err("Error setting fan speed status: %s\n",acpi_format_exception(status));
@@ -3253,16 +3269,20 @@ enum acer_wmi_predator_v4_oc {
              }
          } else if (t_gpu_fan_speed < 0) {
              pr_info("CUSTOM FAN MODE (CPU)\n");
-             status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x400008, NULL);
-             if(ACPI_FAILURE(status)){
-                 pr_err("Error setting fan speed status: %s\n",acpi_format_exception(status));
-                 return AE_ERROR;
+             if (current_fan_behavior != 0x30001) {
+                 status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x400008, NULL);
+                 if(ACPI_FAILURE(status)){
+                     pr_err("Error setting fan speed status: %s\n",acpi_format_exception(status));
+                     return AE_ERROR;
+                 }
+                 status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x30001, NULL);
+                 if(ACPI_FAILURE(status)){
+                     pr_err("Error setting fan speed status: %s\n",acpi_format_exception(status));
+                     return AE_ERROR;
+                 }
+                 current_fan_behavior = 0x30001;
              }
-             status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x30001, NULL);
-             if(ACPI_FAILURE(status)){
-                 pr_err("Error setting fan speed status: %s\n",acpi_format_exception(status));
-                 return AE_ERROR;
-             }
+             msleep(150);
              status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_SPEED_METHODID, fan_val_calc(t_cpu_fan_speed,1), NULL);
              if(ACPI_FAILURE(status)){
                  pr_err("Error setting fan speed status: %s\n",acpi_format_exception(status));
@@ -3271,17 +3291,22 @@ enum acer_wmi_predator_v4_oc {
          } else {
              pr_info("CUSTOM FAN MODE (MIXED)!\n");
              //set gaming behvaiour mode to custom
-             status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0xC30009, NULL);
-             if(ACPI_FAILURE(status)){
-                 pr_err("Error setting fan speed status: %s\n",acpi_format_exception(status));
-                 return AE_ERROR;
+             if (current_fan_behavior != 0xC30009) {
+                 status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0xC30009, NULL);
+                 if(ACPI_FAILURE(status)){
+                     pr_err("Error setting fan speed status: %s\n",acpi_format_exception(status));
+                     return AE_ERROR;
+                 }
+                 current_fan_behavior = 0xC30009;
              }
+             msleep(150);
              //set cpu fan speed
              status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_SPEED_METHODID, fan_val_calc(t_cpu_fan_speed,1), NULL);
              if(ACPI_FAILURE(status)){
                  pr_err("Error setting fan speed status: %s\n",acpi_format_exception(status));
                  return AE_ERROR;
              }
+             msleep(150);
              //set gpu fan speed
              status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_SPEED_METHODID, fan_val_calc(t_gpu_fan_speed,4), NULL);
              if(ACPI_FAILURE(status)){
@@ -3295,9 +3320,51 @@ enum acer_wmi_predator_v4_oc {
  
      cpu_fan_speed = t_cpu_fan_speed;
      gpu_fan_speed = t_gpu_fan_speed;
-     pr_info("Fan speeds updated: CPU=%d, GPU=%d\n", cpu_fan_speed, gpu_fan_speed);
  
      return AE_OK;	
+ }
+
+ static int last_sent_cpu = -2;
+ static int last_sent_gpu = -2;
+ static unsigned long last_wmi_jiffies = 0;
+
+ static void acer_fan_set_work_func(struct work_struct *work) {
+     int t_cpu, t_gpu;
+     bool cpu_changed, gpu_changed, timeout;
+     
+     mutex_lock(&fan_set_mutex);
+     t_cpu = async_cpu_fan_speed;
+     t_gpu = async_gpu_fan_speed;
+     mutex_unlock(&fan_set_mutex);
+     
+     if (t_cpu == -2 && t_gpu == -2) return;
+
+     cpu_changed = (t_cpu != last_sent_cpu);
+     gpu_changed = (t_gpu != last_sent_gpu);
+     timeout = time_after(jiffies, last_wmi_jiffies + msecs_to_jiffies(3500));
+
+     if (!cpu_changed && !gpu_changed && !timeout && last_wmi_jiffies != 0) {
+         return; // Skip WMI spam!
+     }
+
+     acer_set_fan_speed_sync(t_cpu, t_gpu);
+
+     last_sent_cpu = t_cpu;
+     last_sent_gpu = t_gpu;
+     last_wmi_jiffies = jiffies;
+ }
+
+ static DECLARE_WORK(fan_set_work, acer_fan_set_work_func);
+
+ static acpi_status acer_set_fan_speed(int t_cpu_fan_speed, int t_gpu_fan_speed) {
+     mutex_lock(&fan_set_mutex);
+     async_cpu_fan_speed = t_cpu_fan_speed;
+     async_gpu_fan_speed = t_gpu_fan_speed;
+     mutex_unlock(&fan_set_mutex);
+     
+     schedule_work(&fan_set_work);
+     
+     return AE_OK;
  }
  
  static ssize_t predator_fan_speed_show(struct device *dev,

@@ -183,6 +183,21 @@ bool find_hwmon_dir(char* result) {
     return false;
 }
 
+int get_nvidia_temp_mC() {
+    FILE *fp = popen("nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader 2>/dev/null", "r");
+    if (!fp) return -1;
+    char path[128];
+    int temp_mC = -1;
+    if (fgets(path, sizeof(path), fp) != NULL) {
+        int temp = atoi(path);
+        if (temp > 0) {
+            temp_mC = temp * 1000;
+        }
+    }
+    pclose(fp);
+    return temp_mC;
+}
+
 int main(int argc, char* argv[]) {
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
@@ -265,11 +280,13 @@ int main(int argc, char* argv[]) {
                 cpu_temp_mC = atoi(buf);
             }
 
-            lseek(fd_gpu, 0, SEEK_SET);
-            n = read(fd_gpu, buf, sizeof(buf) - 1);
-            if (n > 0) {
-                buf[n] = '\0';
-                gpu_temp_mC = atoi(buf);
+            usleep(25000); // 25ms pause to spread out ACPI/SMI load
+
+            // Read GPU temperature via nvidia-smi to completely bypass WMI SMI traps
+            gpu_temp_mC = get_nvidia_temp_mC();
+            if (gpu_temp_mC < 0) {
+                // Fallback to CPU temperature if Nvidia GPU is asleep or nvidia-smi fails
+                gpu_temp_mC = cpu_temp_mC;
             }
 
             cpu_raw = cpu_temp_mC / 1000;
@@ -294,6 +311,8 @@ int main(int argc, char* argv[]) {
 
             printf("\r%d, %d, %d, %d, %d, %d                ", cpu_raw, cpu_temp, cpu_fan, gpu_raw, gpu_temp, gpu_fan);
             fflush(stdout);
+
+            usleep(25000); // 25ms pause before writing
         }
 
         int out_len = snprintf(buf, sizeof(buf), "%d,%d\n", cpu_fan, gpu_fan);
