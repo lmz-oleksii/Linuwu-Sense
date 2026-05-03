@@ -4404,6 +4404,15 @@ static const enum acer_wmi_predator_v4_sensor_id acer_wmi_fan_channel_to_sensor_
      u64 command = ACER_WMID_CMD_GET_PREDATOR_V4_SENSOR_READING;
      u64 result;
      int ret;
+     static long cached_vals[4][4] = {0};
+     static unsigned long cached_jiffies[4][4] = {0};
+
+     if (type < 4 && channel < 4) {
+         if (cached_jiffies[type][channel] != 0 && time_before(jiffies, cached_jiffies[type][channel] + msecs_to_jiffies(2000))) {
+             *val = cached_vals[type][channel];
+             return 0;
+         }
+     }
  
      switch (type) {
      case hwmon_temp:
@@ -4416,6 +4425,10 @@ static const enum acer_wmi_predator_v4_sensor_id acer_wmi_fan_channel_to_sensor_
  
          result = FIELD_GET(ACER_PREDATOR_V4_SENSOR_READING_BIT_MASK, result);
          *val = result * MILLIDEGREE_PER_DEGREE;
+         if (type < 4 && channel < 4) {
+             cached_vals[type][channel] = *val;
+             cached_jiffies[type][channel] = jiffies ? jiffies : 1;
+         }
          return 0;
      case hwmon_fan:
          command |= FIELD_PREP(ACER_PREDATOR_V4_SENSOR_INDEX_BIT_MASK,
@@ -4426,6 +4439,10 @@ static const enum acer_wmi_predator_v4_sensor_id acer_wmi_fan_channel_to_sensor_
              return ret;
  
          *val = FIELD_GET(ACER_PREDATOR_V4_SENSOR_READING_BIT_MASK, result);
+         if (type < 4 && channel < 4) {
+             cached_vals[type][channel] = *val;
+             cached_jiffies[type][channel] = jiffies ? jiffies : 1;
+         }
          return 0;
      default:
          return -EOPNOTSUPP;
