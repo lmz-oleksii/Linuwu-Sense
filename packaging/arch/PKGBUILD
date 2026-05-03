@@ -1,0 +1,35 @@
+pkgname=linuwu-sense-dkms-git
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Unofficial Linux Kernel Module for Acer Gaming RGB Keyboard Backlight and Turbo Mode"
+arch=('x86_64')
+url="https://github.com/0x7375646F/Linuwu-Sense"
+license=('GPL3')
+depends=('dkms')
+makedepends=('git')
+provides=('linuwu-sense-dkms')
+conflicts=('linuwu-sense-dkms')
+source=("git+https://github.com/0x7375646F/Linuwu-Sense.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$srcdir/Linuwu-Sense"
+  printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+package() {
+  cd "$srcdir/Linuwu-Sense"
+  install -d "$pkgdir/usr/src/linuwu_sense-1.0"
+  cp -r src Makefile dkms.conf daemon linuwu_sense.service "$pkgdir/usr/src/linuwu_sense-1.0/"
+  
+  # Install module configuration files
+  install -d "$pkgdir/etc/modules-load.d"
+  echo "linuwu_sense" > "$pkgdir/etc/modules-load.d/linuwu_sense.conf"
+  
+  install -d "$pkgdir/etc/modprobe.d"
+  echo "blacklist acer_wmi" > "$pkgdir/etc/modprobe.d/blacklist-acer_wmi.conf"
+  
+  # Install systemd service
+  install -d "$pkgdir/usr/lib/systemd/system"
+  install -m644 linuwu_sense.service "$pkgdir/usr/lib/systemd/system/"
+}

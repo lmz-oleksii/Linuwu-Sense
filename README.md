@@ -10,10 +10,8 @@ uname -r
 ```
 
 Install the appropriate Linux headers based on your kernel version. This module has been tested with kernel version (6.12,6.13 ([previous code base](https://github.com/0x7375646F/Linuwu-Sense/tree/v6.13)),6.14) zen. 
-For Arch Linux:
-```bash
-sudo pacman -S linux-headers
-```
+
+### 🐧 Standard Installation (Without DKMS)
 Next, clone the repository and build the module:
 ```bash
 git clone https://github.com/0x7375646F/Linuwu-Sense.git
@@ -22,14 +20,35 @@ make install-driver
 ```
 This command will remove the current `acer_wmi` module and load the patched version. It will also add the module to load on boot.
 
+### 🐧 Arch Linux / DKMS Installation (Recommended)
+Using DKMS ensures that the kernel module is automatically rebuilt whenever you update your kernel.
+
+For Arch Linux:
+```bash
+sudo pacman -S dkms linux-headers
+```
+Next, clone the repository and install using DKMS:
+```bash
+git clone https://github.com/0x7375646F/Linuwu-Sense.git
+cd Linuwu-Sense
+make dkms-install
+```
+*(Alternatively, Arch users can use the provided `PKGBUILD` located in `packaging/arch/PKGBUILD` to build a native package using `makepkg -si`)*.
+
 **(Optional)** Install the custom Fan Control Daemon for fully customizable fan curves:
 ```bash
 sudo make install-daemon
 ```
 
-To Uninstall:
+To Uninstall (Standard):
 ```bash
 make uninstall-driver
+make uninstall-daemon
+```
+
+To Uninstall (DKMS):
+```bash
+make dkms-uninstall
 make uninstall-daemon
 ```
 > **⚠️ Warning!**
