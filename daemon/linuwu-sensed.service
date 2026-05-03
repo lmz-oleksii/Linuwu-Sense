@@ -7,7 +7,7 @@ Wants=linuwu_sense.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/linuwu-sensed --config /etc/linuwu-sense-daemon.yaml --syslog
+ExecStart=/usr/local/bin/linuwu-sensed /etc/linuwu-sense.conf
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5s

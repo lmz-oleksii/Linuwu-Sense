@@ -18,13 +18,19 @@ Next, clone the repository and build the module:
 ```bash
 git clone https://github.com/0x7375646F/Linuwu-Sense.git
 cd Linuwu-Sense
-make install
+make install-driver
 ```
-The make command will remove the current acer_wmi module and load the patched version.
+This command will remove the current `acer_wmi` module and load the patched version. It will also add the module to load on boot.
+
+**(Optional)** Install the custom Fan Control Daemon for fully customizable fan curves:
+```bash
+sudo make install-daemon
+```
 
 To Uninstall:
 ```bash
-make uninstall
+make uninstall-driver
+make uninstall-daemon
 ```
 > **⚠️ Warning!**
 > ## Use at your own risk! This driver is independently developed through reverse engineering the official PredatorSense app, without any involvement from Acer. It interacts with low-level WMI methods, which may not be tested across all models.
@@ -33,6 +39,26 @@ make uninstall
 # Example Usage and Configuration
 
 Thermal profiles can be easily switched with a single click! 😎 For battery mode, you can choose between Eco and Balanced, while when plugged into AC, you have the options for Quiet, Balanced, Performance, and Turbo. ⚡💻 Each profile will be different for battery and AC, and the thermal and fan settings will automatically adjust based on your current power source. Customize it to fit your preferences! 🌟
+
+---
+
+### **Fan Control Daemon (`linuwu-sensed`) 🌪️**
+
+If you installed the optional fan daemon, it runs continuously in the background to enforce a smooth, highly customizable fan curve, bypassing the restrictive embedded controller behavior.
+
+**Configuration:**
+The daemon reads settings from `/etc/linuwu-sense.conf`. You can edit this file to tweak your fan curves and update the smoothing:
+```bash
+sudo nano /etc/linuwu-sense.conf
+```
+
+It uses an **Exponential Moving Average (EMA)** to smooth out brief temperature spikes (meaning no annoying fan rev-ups for short workloads) and uses a **hysteresis** logic to prevent the fan from constantly oscillating up and down.
+
+**Restarting the daemon:**
+Whenever you update your `/etc/linuwu-sense.conf`, simply restart the daemon to apply the new curve instantly:
+```bash
+sudo systemctl restart linuwu-sensed
+```
 
 ---
 

@@ -13,10 +13,20 @@ daemon:
 	$(MAKE) -C daemon
 
 install-daemon: daemon
-	@sudo bash daemon/install.sh
+	@sudo $(MAKE) -C daemon install
+	@sudo cp daemon/linuwu-sensed.service /etc/systemd/system/
+	@sudo systemctl daemon-reload
+	@sudo systemctl enable linuwu-sensed.service
+	@sudo systemctl start linuwu-sensed.service
+	@echo "Daemon installed and added to autostart."
 
 uninstall-daemon:
-	@sudo bash daemon/uninstall.sh
+	@sudo systemctl stop linuwu-sensed.service || true
+	@sudo systemctl disable linuwu-sensed.service || true
+	@sudo rm -f /etc/systemd/system/linuwu-sensed.service
+	@sudo systemctl daemon-reload
+	@sudo $(MAKE) -C daemon uninstall
+	@echo "Daemon uninstalled."
 
 clean-daemon:
 	$(MAKE) -C daemon clean
@@ -48,7 +58,7 @@ all:
 clean:
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
 
-uninstall:
+uninstall-driver:
 	@sudo rm -f /etc/modules-load.d/$(MODNAME).conf
 	@sudo rm -f /etc/modprobe.d/blacklist-acer_wmi.conf
 	@sudo systemctl stop linuwu_sense.service
@@ -69,7 +79,7 @@ uninstall:
 	@sudo depmod -a
 	@echo "Uninstalled $(MODNAME) and cleaned up related configuration."
 
-install: all
+install-driver: all
 	@sudo rmmod acer_wmi 2>/dev/null || true
 	@echo "blacklist acer_wmi" | sudo tee /etc/modprobe.d/blacklist-acer_wmi.conf > /dev/null
 	sudo install -d $(MDIR)
