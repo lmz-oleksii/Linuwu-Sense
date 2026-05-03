@@ -3220,6 +3220,7 @@ enum acer_wmi_predator_v4_oc {
  static DEFINE_MUTEX(fan_set_mutex);
  static int async_cpu_fan_speed = -2;
  static int async_gpu_fan_speed = -2;
+ static struct workqueue_struct *acer_wq;
 
  static acpi_status acer_set_fan_speed_sync(int t_cpu_fan_speed, int t_gpu_fan_speed){
      
@@ -3362,7 +3363,9 @@ enum acer_wmi_predator_v4_oc {
      async_gpu_fan_speed = t_gpu_fan_speed;
      mutex_unlock(&fan_set_mutex);
      
-     schedule_work(&fan_set_work);
+     if (acer_wq) {
+         queue_work(acer_wq, &fan_set_work);
+     }
      
      return AE_OK;
  }
@@ -4404,15 +4407,6 @@ static const enum acer_wmi_predator_v4_sensor_id acer_wmi_fan_channel_to_sensor_
      u64 command = ACER_WMID_CMD_GET_PREDATOR_V4_SENSOR_READING;
      u64 result;
      int ret;
-     static long cached_vals[4][4] = {0};
-     static unsigned long cached_jiffies[4][4] = {0};
-
-     if (type < 4 && channel < 4) {
-         if (cached_jiffies[type][channel] != 0 && time_before(jiffies, cached_jiffies[type][channel] + msecs_to_jiffies(2000))) {
-             *val = cached_vals[type][channel];
-             return 0;
-         }
-     }
  
      switch (type) {
      case hwmon_temp:
@@ -4425,10 +4419,6 @@ static const enum acer_wmi_predator_v4_sensor_id acer_wmi_fan_channel_to_sensor_
  
          result = FIELD_GET(ACER_PREDATOR_V4_SENSOR_READING_BIT_MASK, result);
          *val = result * MILLIDEGREE_PER_DEGREE;
-         if (type < 4 && channel < 4) {
-             cached_vals[type][channel] = *val;
-             cached_jiffies[type][channel] = jiffies ? jiffies : 1;
-         }
          return 0;
      case hwmon_fan:
          command |= FIELD_PREP(ACER_PREDATOR_V4_SENSOR_INDEX_BIT_MASK,
@@ -4439,10 +4429,6 @@ static const enum acer_wmi_predator_v4_sensor_id acer_wmi_fan_channel_to_sensor_
              return ret;
  
          *val = FIELD_GET(ACER_PREDATOR_V4_SENSOR_READING_BIT_MASK, result);
-         if (type < 4 && channel < 4) {
-             cached_vals[type][channel] = *val;
-             cached_jiffies[type][channel] = jiffies ? jiffies : 1;
-         }
          return 0;
      default:
          return -EOPNOTSUPP;
@@ -4506,6 +4492,12 @@ static const enum acer_wmi_predator_v4_sensor_id acer_wmi_fan_channel_to_sensor_
      int err;
  
      pr_info("Acer Laptop ACPI-WMI Extras\n");
+ 
+     acer_wq = alloc_workqueue("acer-wmi-wq", WQ_UNBOUND | WQ_FREEZABLE, 1);
+     if (!acer_wq) {
+         pr_err("Failed to allocate WMI workqueue\n");
+         return -ENOMEM;
+     }
  
      if (dmi_check_system(acer_blacklist)) {
          pr_info("Blacklisted hardware detected - not loading\n");
@@ -4655,6 +4647,11 @@ static const enum acer_wmi_predator_v4_sensor_id acer_wmi_fan_channel_to_sensor_
  
  static void __exit acer_wmi_exit(void)
  {
+     if (acer_wq) {
+         flush_workqueue(acer_wq);
+         destroy_workqueue(acer_wq);
+     }
+ 
      if (wmi_has_guid(ACERWMID_EVENT_GUID))
          acer_wmi_input_destroy();
  
