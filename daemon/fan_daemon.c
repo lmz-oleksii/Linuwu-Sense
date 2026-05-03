@@ -183,6 +183,57 @@ bool find_hwmon_dir(char* result) {
     return false;
 }
 
+bool is_nvidia_gpu_active() {
+    DIR *d = opendir("/sys/bus/pci/devices");
+    if (!d) return true;
+    struct dirent *ent;
+    bool is_active = true;
+    while ((ent = readdir(d)) != NULL) {
+        if (ent->d_name[0] == '.') continue;
+        char path[512];
+        snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/vendor", ent->d_name);
+        FILE *f = fopen(path, "r");
+        if (!f) continue;
+        char vendor[16] = {0};
+        if (fgets(vendor, sizeof(vendor), f)) {
+            if (strncmp(vendor, "0x10de", 6) == 0) {
+                char class_path[512];
+                snprintf(class_path, sizeof(class_path), "/sys/bus/pci/devices/%s/class", ent->d_name);
+                FILE *fc = fopen(class_path, "r");
+                if (fc) {
+                    char dev_class[16] = {0};
+                    if (fgets(dev_class, sizeof(dev_class), fc)) {
+                        if (strncmp(dev_class, "0x030000", 8) == 0 || strncmp(dev_class, "0x030200", 8) == 0) {
+                            char status_path[512];
+                            snprintf(status_path, sizeof(status_path), "/sys/bus/pci/devices/%s/power/runtime_status", ent->d_name);
+                            FILE *fs = fopen(status_path, "r");
+                            if (fs) {
+                                char status[32] = {0};
+                                if (fgets(status, sizeof(status), fs)) {
+                                    if (strncmp(status, "suspended", 9) == 0) {
+                                        is_active = false;
+                                    } else {
+                                        is_active = true;
+                                    }
+                                }
+                                fclose(fs);
+                            }
+                            fclose(fc);
+                            fclose(f);
+                            closedir(d);
+                            return is_active;
+                        }
+                    }
+                    fclose(fc);
+                }
+            }
+        }
+        fclose(f);
+    }
+    closedir(d);
+    return is_active;
+}
+
 int get_nvidia_temp_mC() {
     FILE *fp = popen("nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader 2>/dev/null", "r");
     if (!fp) return -1;
@@ -282,11 +333,14 @@ int main(int argc, char* argv[]) {
 
             usleep(25000); // 25ms pause to spread out ACPI/SMI load
 
-            // Read GPU temperature via nvidia-smi to completely bypass WMI SMI traps
-            gpu_temp_mC = get_nvidia_temp_mC();
-            if (gpu_temp_mC < 0) {
-                // Fallback to CPU temperature if Nvidia GPU is asleep or nvidia-smi fails
-                gpu_temp_mC = cpu_temp_mC;
+            // Prevent massive battery drain: don't wake up Nvidia GPU if it's sleeping!
+            if (!is_nvidia_gpu_active()) {
+                gpu_temp_mC = cpu_temp_mC; // Fallback to CPU temp
+            } else {
+                gpu_temp_mC = get_nvidia_temp_mC();
+                if (gpu_temp_mC < 0) {
+                    gpu_temp_mC = cpu_temp_mC;
+                }
             }
 
             cpu_raw = cpu_temp_mC / 1000;
