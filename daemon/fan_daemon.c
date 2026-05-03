@@ -235,17 +235,17 @@ bool is_nvidia_gpu_active() {
 }
 
 int get_nvidia_temp_mC() {
-    FILE *fp = popen("nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader 2>/dev/null", "r");
+    FILE *fp = fopen("/sys/class/thermal/thermal_zone2/temp", "r");
     if (!fp) return -1;
     char path[128];
     int temp_mC = -1;
     if (fgets(path, sizeof(path), fp) != NULL) {
         int temp = atoi(path);
         if (temp > 0) {
-            temp_mC = temp * 1000;
+            temp_mC = temp;
         }
     }
-    pclose(fp);
+    fclose(fp);
     return temp_mC;
 }
 
